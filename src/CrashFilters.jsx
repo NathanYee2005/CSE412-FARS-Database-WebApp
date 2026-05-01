@@ -164,7 +164,7 @@ export default function CrashFilters({ onSearch, loading }) {
                 className={styles.input}
                 placeholder="e.g. 2022"
                 min="1975"
-                max="2023"
+                max="2024"
                 value={filters.year}
                 onChange={handleChange}
               />
