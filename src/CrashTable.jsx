@@ -1,12 +1,38 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import styles from "./CrashTable.module.css";
 
 const WEATHER_MAP = {
-  1: "Clear", 2: "Rain"
+  1: "Clear", 2: "Rain", 3: "Sleet or Hail", 4: "Snow",
+  5: "Fog, Smog, Smoke", 6: "Severe Crosswinds", 7: "Blowing Sand, Soil, Dirt",
+  8: "Other", 10: "Cloudy", 11: "Blowing Snow", 12: "Freezing Rain or Drizzle",
+  98: "Not Reported", 99: "Unknown",
 };
 
 const LIGHT_MAP = {
-  1: "Daylight", 2: "Dark"
+  1: "Daylight", 2: "Dark - Not Lighted", 3: "Dark - Lighted",
+  4: "Dawn", 5: "Dusk", 6: "Dark - Unknown Lighting",
+  7: "Other", 8: "Not Reported", 9: "Unknown",
+};
+
+const WRK_ZONE_MAP = {
+  0: "None", 1: "Construction", 2: "Maintenance",
+  3: "Utility", 4: "Work Zone, Type Unknown",
+};
+
+const STATE_MAP = {
+  1: "Alabama", 2: "Alaska", 4: "Arizona", 5: "Arkansas",
+  6: "California", 8: "Colorado", 9: "Connecticut", 10: "Delaware",
+  11: "District of Columbia", 12: "Florida", 13: "Georgia", 15: "Hawaii",
+  16: "Idaho", 17: "Illinois", 18: "Indiana", 19: "Iowa",
+  20: "Kansas", 21: "Kentucky", 22: "Louisiana", 23: "Maine",
+  24: "Maryland", 25: "Massachusetts", 26: "Michigan", 27: "Minnesota",
+  28: "Mississippi", 29: "Missouri", 30: "Montana", 31: "Nebraska",
+  32: "Nevada", 33: "New Hampshire", 34: "New Jersey", 35: "New Mexico",
+  36: "New York", 37: "North Carolina", 38: "North Dakota", 39: "Ohio",
+  40: "Oklahoma", 41: "Oregon", 42: "Pennsylvania", 44: "Rhode Island",
+  45: "South Carolina", 46: "South Dakota", 47: "Tennessee", 48: "Texas",
+  49: "Utah", 50: "Vermont", 51: "Virginia", 53: "Washington",
+  54: "West Virginia", 55: "Wisconsin", 56: "Wyoming",
 };
 
 const MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -20,6 +46,7 @@ const COLUMNS = [
   { key: "ve_total",  label: "Vehicles",    sortable: true  },
   { key: "weather",   label: "Weather",     sortable: false },
   { key: "lgt_cond",  label: "Light",       sortable: false },
+  { key: "wrk_zone",  label: "Work Zone",   sortable: false },
   { key: "state",     label: "State",       sortable: true  },
   { key: "location",  label: "Location",    sortable: false },
 ];
@@ -54,11 +81,6 @@ export default function CrashTable({ crashes, loading, error, total }) {
   const [sortDir, setSortDir] = useState("desc");
   const [page, setPage] = useState(1);
   const pageSize = 20;
-
-  // Reset to page 1 whenever a new set of results comes in
-  useEffect(() => {
-    setPage(1);
-  }, [crashes]);
 
   const handleSort = (key) => {
     if (sortKey === key) {
@@ -191,7 +213,10 @@ export default function CrashTable({ crashes, loading, error, total }) {
                 <td className={styles.td}>
                   <span className={styles.pill}>{LIGHT_MAP[crash.lgt_cond] ?? "Unknown"}</span>
                 </td>
-                <td className={styles.td}>{crash.state ?? "—"}</td>
+                <td className={styles.td}>
+                  <span className={styles.pill}>{WRK_ZONE_MAP[crash.wrk_zone] ?? "—"}</span>
+                </td>
+                <td className={styles.td}>{STATE_MAP[crash.state] ?? crash.state ?? "—"}</td>
                 <td className={styles.td}>
                   {crash.latitude != null && crash.longitude != null
                     ? `${Number(crash.latitude).toFixed(4)}, ${Number(crash.longitude).toFixed(4)}`
