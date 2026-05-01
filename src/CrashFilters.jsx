@@ -1,4 +1,5 @@
 import { useState } from "react";
+import styles from "./CrashFilters.module.css";
 
 const WEATHER_OPTIONS = [
   { value: "", label: "Any" },
@@ -62,81 +63,96 @@ export default function CrashFilters({ onSearch, loading }) {
   };
 
   return (
-    <div>
-      <div onClick={() => setExpanded((p) => !p)} style={{ cursor: "pointer" }}>
-        <strong>Filter Crashes</strong> {expanded ? "▲" : "▼"}
+    <div className={styles.filterCard}>
+      <div className={styles.filterHeader} onClick={() => setExpanded((p) => !p)}>
+        <div className={styles.filterTitle}>
+          <span className={styles.filterIcon}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </span>
+          Filter Crashes
+        </div>
+        <span className={`${styles.chevron} ${expanded ? styles.chevronUp : ""}`}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </span>
       </div>
 
       {expanded && (
-        <form onSubmit={handleSubmit}>
-          <div>
-            <label>
-              Year
+        <form onSubmit={handleSubmit} className={styles.filterForm}>
+          <div className={styles.filterGrid}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Year</label>
               <input
                 type="number"
                 name="year"
+                className={styles.input}
                 placeholder="e.g. 2022"
                 min="1975"
                 max="2023"
                 value={filters.year}
                 onChange={handleChange}
               />
-            </label>
+            </div>
 
-            <label>
-              Month
-              <select name="month" value={filters.month} onChange={handleChange}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Month</label>
+              <select name="month" className={styles.select} value={filters.month} onChange={handleChange}>
                 {MONTH_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
-            </label>
+            </div>
 
-            <label>
-              Weather
-              <select name="weather" value={filters.weather} onChange={handleChange}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Weather</label>
+              <select name="weather" className={styles.select} value={filters.weather} onChange={handleChange}>
                 {WEATHER_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
-            </label>
+            </div>
 
-            <label>
-              Light Condition
-              <select name="lgt_cond" value={filters.lgt_cond} onChange={handleChange}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Light Condition</label>
+              <select name="lgt_cond" className={styles.select} value={filters.lgt_cond} onChange={handleChange}>
                 {LIGHT_COND_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
-            </label>
+            </div>
 
-            <label>
-              Min Fatalities
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Min Fatalities</label>
               <input
                 type="number"
                 name="min_fatals"
+                className={styles.input}
                 placeholder="0"
                 min="0"
                 value={filters.min_fatals}
                 onChange={handleChange}
               />
-            </label>
+            </div>
 
-            <label>
-              Max Fatalities
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Max Fatalities</label>
               <input
                 type="number"
                 name="max_fatals"
+                className={styles.input}
                 placeholder="Any"
                 min="0"
                 value={filters.max_fatals}
                 onChange={handleChange}
               />
-            </label>
+            </div>
 
-            <label>
-              Work Zone
-              <select name="wrk_zone" value={filters.wrk_zone} onChange={handleChange}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Work Zone</label>
+              <select name="wrk_zone" className={styles.select} value={filters.wrk_zone} onChange={handleChange}>
                 <option value="">Any</option>
                 <option value="0">No Work Zone</option>
                 <option value="1">Construction</option>
@@ -144,26 +160,39 @@ export default function CrashFilters({ onSearch, loading }) {
                 <option value="3">Utility</option>
                 <option value="4">Unknown</option>
               </select>
-            </label>
+            </div>
 
-            <label>
-              State Code
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>State Code</label>
               <input
                 type="number"
                 name="state"
+                className={styles.input}
                 placeholder="e.g. 6 (CA)"
                 min="1"
                 max="56"
                 value={filters.state}
                 onChange={handleChange}
               />
-            </label>
+            </div>
           </div>
 
-          <div>
-            <button type="button" onClick={handleReset}>Clear</button>
-            <button type="submit" disabled={loading}>
-              {loading ? "Searching…" : "Search Crashes"}
+          <div className={styles.filterActions}>
+            <button type="button" className={styles.resetBtn} onClick={handleReset}>
+              Clear
+            </button>
+            <button type="submit" className={styles.searchBtn} disabled={loading}>
+              {loading ? (
+                <span className={styles.spinner} />
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M9.5 9.5L12.5 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  Search Crashes
+                </>
+              )}
             </button>
           </div>
         </form>
