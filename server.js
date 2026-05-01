@@ -18,18 +18,7 @@ function parseIntParam(val, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-// GET /api/crashes
-app.get("/api/crashes", async (req, res) => {
-  const {
-    year, month, weather, lgt_cond,
-    min_fatals, max_fatals, wrk_zone, state,
-    limit: rawLimit = "500",
-    offset: rawOffset = "0",
-  } = req.query;
-
-  const limit = Math.min(parseIntParam(rawLimit, 500), 1000);
-  const offset = parseIntParam(rawOffset, 0);
-
+function buildCrashFilter(query) {
   const conditions = [];
   const values = [];
   let idx = 1;
@@ -42,19 +31,29 @@ app.get("/api/crashes", async (req, res) => {
     }
   };
 
-  addInt("year", year);
-  addInt("month", month);
-  addInt("weather", weather);
-  addInt("lgt_cond", lgt_cond);
-  addInt("wrk_zone", wrk_zone);
-  addInt("state", state, "l");
+  addInt("year", query.year);
+  addInt("month", query.month);
+  addInt("weather", query.weather);
+  addInt("lgt_cond", query.lgt_cond);
+  addInt("wrk_zone", query.wrk_zone);
+  addInt("state", query.state, "l");
 
-  const minF = parseIntParam(min_fatals, null);
-  const maxF = parseIntParam(max_fatals, null);
+  const minF = parseIntParam(query.min_fatals, null);
+  const maxF = parseIntParam(query.max_fatals, null);
   if (minF !== null) { conditions.push(`c.fatals >= $${idx++}`); values.push(minF); }
   if (maxF !== null) { conditions.push(`c.fatals <= $${idx++}`); values.push(maxF); }
 
-  const where = conditions.length > 0 ? "WHERE " + conditions.join(" AND ") : "";
+  return { conditions, values, idx };
+}
+
+// GET /api/crashes capped at 1000 for table in frontend
+app.get("/api/crashes", async (req, res) => {
+  const limit = Math.min(parseIntParam(req.query.limit, 500), 1000);
+  const offset = parseIntParam(req.query.offset, 0);
+
+  const filter = buildCrashFilter(req.query);
+  const where = filter.conditions.length ? "WHERE " + filter.conditions.join(" AND ") : "";
+  let idx = filter.idx;
 
   const dataQuery = `
     SELECT
@@ -78,13 +77,39 @@ app.get("/api/crashes", async (req, res) => {
 
   try {
     const [dataResult, countResult] = await Promise.all([
-      pool.query(dataQuery, [...values, limit, offset]),
-      pool.query(countQuery, values),
+      pool.query(dataQuery, [...filter.values, limit, offset]),
+      pool.query(countQuery, filter.values),
     ]);
     res.json({
       crashes: dataResult.rows,
       total: parseInt(countResult.rows[0].total, 10),
     });
+  } catch (err) {
+    console.error("DB error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /api/crashes/heatmap not capped for correct heatmap rendering
+app.get("/api/crashes/heatmap", async (req, res) => {
+  const filter = buildCrashFilter(req.query);
+  const allConditions = [
+    ...filter.conditions,
+    "c.latitude IS NOT NULL",
+    "c.longitude IS NOT NULL",
+  ];
+  const where = "WHERE " + allConditions.join(" AND ");
+
+  const sql = `
+    SELECT c.latitude, c.longitude, c.fatals
+    FROM Crash c
+    LEFT JOIN Location l ON c.latitude = l.latitude AND c.longitude = l.longitude
+    ${where}
+  `;
+
+  try {
+    const result = await pool.query(sql, filter.values);
+    res.json({ points: result.rows });
   } catch (err) {
     console.error("DB error:", err);
     res.status(500).json({ message: "Internal server error" });

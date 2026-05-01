@@ -62,7 +62,7 @@ def ints(row, fields):
 
 
 def csv_rows(csv_dir, filename):
-    with open(Path(csv_dir) / filename, newline='') as fh:
+    with open(Path(csv_dir) / filename, newline='', encoding='utf-8-sig') as fh:
         yield from csv.DictReader(fh)
 
 
