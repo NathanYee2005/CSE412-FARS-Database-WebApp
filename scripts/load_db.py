@@ -30,13 +30,13 @@ TABLE_COLUMNS = (
     ('Location', ('LATITUDE', 'LONGITUDE', *LOCATION_FIELDS)),
     ('Crash', ('ST_CASE', *CRASH_FIELDS, 'LATITUDE', 'LONGITUDE', 'WEATHER', 'LGT_COND', 'WRK_ZONE')),
     ('Vehicle', ('VIN', 'VEH_NO', *VEHICLE_FIELDS)),
-    ('Person', ('ST_CASE', 'PER_NO', *PERSON_FIELDS)),
-    ('Pedestrian', ('PER_NO', 'ST_CASE')),
-    ('CarPerson', ('PER_NO', 'ST_CASE', *CAR_PERSON_FIELDS)),
-    ('Passenger', ('PER_NO', 'ST_CASE')),
-    ('Driver', ('PER_NO', 'ST_CASE', *DRIVER_FIELDS)),
-    ('Rides_In', ('PER_NO', 'ST_CASE', 'VIN')),
-    ('Involves', ('ST_CASE', 'VIN', *INVOLVES_FIELDS)),
+    ('Person', ('ST_CASE', 'PER_NO', 'YEAR', *PERSON_FIELDS)),
+    ('Pedestrian', ('PER_NO', 'ST_CASE', 'YEAR')),
+    ('CarPerson', ('PER_NO', 'ST_CASE', 'YEAR', *CAR_PERSON_FIELDS)),
+    ('Passenger', ('PER_NO', 'ST_CASE', 'YEAR')),
+    ('Driver', ('PER_NO', 'ST_CASE', 'YEAR', *DRIVER_FIELDS)),
+    ('Rides_In', ('PER_NO', 'ST_CASE', 'YEAR', 'VIN')),
+    ('Involves', ('ST_CASE', 'YEAR', 'VIN', *INVOLVES_FIELDS)),
 )
 
 
@@ -74,8 +74,17 @@ def is_sentinel(lat):
     return any(abs(value - sentinel) < 0.001 for sentinel in SENTINEL_LATS)
 
 
-def resolve_vin(vin, st_case, veh_no):
-    return f'UNK{st_case}V{veh_no}' if vin in PLACEHOLDER_VINS else vin
+def resolve_vin(vin, year, st_case, veh_no):
+    return f'UNK{year}{st_case}V{veh_no}' if vin in PLACEHOLDER_VINS else vin
+
+
+def sniff_year(csv_dir):
+    for row in csv_rows(csv_dir, 'accident.csv'):
+        year = to_int(row['YEAR'])
+        if year is None:
+            sys.exit("Could not read YEAR from accident.csv")
+        return year
+    sys.exit("accident.csv is empty")
 
 
 def synth_per_no(veh_no, per_no):
@@ -102,47 +111,51 @@ def read_accidents(csv_dir):
     return list(locations.values()), crashes
 
 
-def read_vehicles(csv_dir):
+def read_vehicles(csv_dir, year):
     vin_map, vehicles, involves = {}, {}, {}
     for row in csv_rows(csv_dir, 'vehicle.csv'):
         st_case, veh_no = row['ST_CASE'], row['VEH_NO']
         st_int = to_int(st_case)
-        vin = resolve_vin(row['VIN'], st_case, veh_no)
+        vin = resolve_vin(row['VIN'], year, st_case, veh_no)
         vin_map[(st_case, veh_no)] = vin
         vehicles.setdefault(vin, (vin, to_int(veh_no), *ints(row, VEHICLE_FIELDS)))
-        involves.setdefault((st_int, vin), (st_int, vin, *ints(row, INVOLVES_FIELDS)))
+        involves.setdefault((st_int, vin), (st_int, year, vin, *ints(row, INVOLVES_FIELDS)))
     return list(vehicles.values()), list(involves.values()), vin_map
 
 
-def read_persons(csv_dir, vin_map):
+def read_persons(csv_dir, vin_map, year):
     persons, peds, car_people, passengers, drivers, rides_in = ({} for _ in range(6))
     for row in csv_rows(csv_dir, 'person.csv'):
         st_case, veh_no, per_type = row['ST_CASE'], row['VEH_NO'], row['PER_TYP']
         st_int = to_int(st_case)
         per_no = synth_per_no(veh_no, row['PER_NO'])
         key = (per_no, st_int)
-        persons.setdefault(key, (st_int, per_no, *ints(row, PERSON_FIELDS)))
+        persons.setdefault(key, (st_int, per_no, year, *ints(row, PERSON_FIELDS)))
 
         if per_type in ('1', '2'):
-            car_people.setdefault(key, (per_no, st_int, *ints(row, CAR_PERSON_FIELDS)))
+            car_people.setdefault(key, (per_no, st_int, year, *ints(row, CAR_PERSON_FIELDS)))
             vin = vin_map.get((st_case, veh_no))
             if vin:
-                rides_in.setdefault(key, (per_no, st_int, vin))
+                rides_in.setdefault(key, (per_no, st_int, year, vin))
             if per_type == '1':
-                drivers.setdefault(key, (per_no, st_int, *ints(row, DRIVER_FIELDS)))
+                drivers.setdefault(key, (per_no, st_int, year, *ints(row, DRIVER_FIELDS)))
             else:
-                passengers.setdefault(key, (per_no, st_int))
+                passengers.setdefault(key, (per_no, st_int, year))
         elif per_type in ('5', '6'):
-            peds.setdefault(key, (per_no, st_int))
+            peds.setdefault(key, (per_no, st_int, year))
 
     return tuple(list(rows.values()) for rows in (persons, peds, car_people, passengers, drivers, rides_in))
+
+
+SHARED_TABLES = {'Location', 'Vehicle'}  # PK is year-independent; skip rows already loaded by another year
 
 
 def insert_many(cur, table, columns, rows, page_size=1000):
     if not rows:
         print(f"  {table:<11s}    0  (skipped)")
         return
-    execute_values(cur, f"INSERT INTO {table} ({', '.join(columns)}) VALUES %s", rows, page_size=page_size)
+    suffix = ' ON CONFLICT DO NOTHING' if table in SHARED_TABLES else ''
+    execute_values(cur, f"INSERT INTO {table} ({', '.join(columns)}) VALUES %s{suffix}", rows, page_size=page_size)
     print(f"  {table:<11s} {len(rows):>6d}")
 
 
@@ -151,6 +164,8 @@ def parse_args():
     parser.add_argument('--csv-dir', required=True, help='Folder containing accident.csv, vehicle.csv, and person.csv.')
     parser.add_argument('--schema', default=SCHEMA_SQL, help='Path to schema SQL file.')
     parser.add_argument('--no-schema', action='store_true', help='Skip running the schema file.')
+    parser.add_argument('--year', type=int, default=None,
+                        help='FARS year to stamp on every row. Defaults to YEAR from accident.csv.')
     parser.add_argument('--dbname', default=os.environ.get('PGDATABASE', 'fars'))
     parser.add_argument('--host', default=os.environ.get('PGHOST'))
     parser.add_argument('--port', default=os.environ.get('PGPORT'))
@@ -181,10 +196,11 @@ def main():
                 with open(args.schema) as fh:
                     cur.execute(fh.read())
 
-            print("Reading CSVs...")
+            year = args.year if args.year is not None else sniff_year(csv_dir)
+            print(f"Reading CSVs (YEAR={year})...")
             locations, crashes = read_accidents(csv_dir)
-            vehicles, involves, vin_map = read_vehicles(csv_dir)
-            persons, peds, car_people, passengers, drivers, rides_in = read_persons(csv_dir, vin_map)
+            vehicles, involves, vin_map = read_vehicles(csv_dir, year)
+            persons, peds, car_people, passengers, drivers, rides_in = read_persons(csv_dir, vin_map, year)
             rows_by_table = {
                 'Location': locations, 'Crash': crashes, 'Vehicle': vehicles, 'Person': persons,
                 'Pedestrian': peds, 'CarPerson': car_people, 'Passenger': passengers, 'Driver': drivers,
