@@ -134,13 +134,13 @@ const TABLE_COLUMNS = [
   ["Location",   ["LATITUDE", "LONGITUDE", ...LOCATION_FIELDS]],
   ["Crash",      ["ST_CASE", ...CRASH_FIELDS, "LATITUDE", "LONGITUDE", "WEATHER", "LGT_COND", "WRK_ZONE"]],
   ["Vehicle",    ["VIN", "VEH_NO", ...VEHICLE_FIELDS]],
-  ["Person",     ["ST_CASE", "PER_NO", ...PERSON_FIELDS]],
-  ["Pedestrian", ["PER_NO", "ST_CASE"]],
-  ["CarPerson",  ["PER_NO", "ST_CASE", ...CAR_PERSON_FIELDS]],
-  ["Passenger",  ["PER_NO", "ST_CASE"]],
-  ["Driver",     ["PER_NO", "ST_CASE", ...DRIVER_FIELDS]],
-  ["Rides_In",   ["PER_NO", "ST_CASE", "VIN"]],
-  ["Involves",   ["ST_CASE", "VIN", ...INVOLVES_FIELDS]],
+  ["Person",     ["ST_CASE", "PER_NO", "YEAR", ...PERSON_FIELDS]],
+  ["Pedestrian", ["PER_NO", "ST_CASE", "YEAR"]],
+  ["CarPerson",  ["PER_NO", "ST_CASE", "YEAR", ...CAR_PERSON_FIELDS]],
+  ["Passenger",  ["PER_NO", "ST_CASE", "YEAR"]],
+  ["Driver",     ["PER_NO", "ST_CASE", "YEAR", ...DRIVER_FIELDS]],
+  ["Rides_In",   ["PER_NO", "ST_CASE", "YEAR", "VIN"]],
+  ["Involves",   ["ST_CASE", "YEAR", "VIN", ...INVOLVES_FIELDS]],
 ];
 
 const toInt = (v) => {
@@ -160,9 +160,17 @@ const isSentinel = (lat) => {
   if (!Number.isFinite(v)) return true;
   return SENTINEL_LATS.some((s) => Math.abs(v - s) < 0.001);
 };
-const resolveVin = (vin, stCase, vehNo) =>
-  PLACEHOLDER_VINS.has(vin) ? `UNK${stCase}V${vehNo}` : vin;
+const resolveVin = (vin, year, stCase, vehNo) =>
+  PLACEHOLDER_VINS.has(vin) ? `UNK${year}${stCase}V${vehNo}` : vin;
 const synthPerNo = (vehNo, perNo) => parseInt(vehNo, 10) * 100 + parseInt(perNo, 10);
+
+function sniffYear(rows) {
+  for (const row of rows) {
+    const y = toInt(row.YEAR);
+    if (y !== null) return y;
+  }
+  return null;
+}
 
 function readAccidents(rows) {
   const locations = new Map();
@@ -189,27 +197,27 @@ function readAccidents(rows) {
   return { locations: [...locations.values()], crashes };
 }
 
-function readVehicles(rows) {
+function readVehicles(rows, year) {
   const vehicles = new Map();
   const involves = new Map();
   const vinMap = new Map();
   for (const row of rows) {
     const stCase = row.ST_CASE, vehNo = row.VEH_NO;
     const stInt = toInt(stCase);
-    const vin = resolveVin(row.VIN, stCase, vehNo);
+    const vin = resolveVin(row.VIN, year, stCase, vehNo);
     vinMap.set(`${stCase}|${vehNo}`, vin);
     if (!vehicles.has(vin)) {
       vehicles.set(vin, [vin, toInt(vehNo), ...ints(row, VEHICLE_FIELDS)]);
     }
     const ik = `${stInt}|${vin}`;
     if (!involves.has(ik)) {
-      involves.set(ik, [stInt, vin, ...ints(row, INVOLVES_FIELDS)]);
+      involves.set(ik, [stInt, year, vin, ...ints(row, INVOLVES_FIELDS)]);
     }
   }
   return { vehicles: [...vehicles.values()], involves: [...involves.values()], vinMap };
 }
 
-function readPersons(rows, vinMap) {
+function readPersons(rows, vinMap, year) {
   const persons = new Map(), peds = new Map(), carPeople = new Map();
   const passengers = new Map(), drivers = new Map(), ridesIn = new Map();
   for (const row of rows) {
@@ -218,23 +226,23 @@ function readPersons(rows, vinMap) {
     const perNo = synthPerNo(vehNo, row.PER_NO);
     const key = `${perNo}|${stInt}`;
     if (!persons.has(key)) {
-      persons.set(key, [stInt, perNo, ...ints(row, PERSON_FIELDS)]);
+      persons.set(key, [stInt, perNo, year, ...ints(row, PERSON_FIELDS)]);
     }
     if (perType === "1" || perType === "2") {
       if (!carPeople.has(key)) {
-        carPeople.set(key, [perNo, stInt, ...ints(row, CAR_PERSON_FIELDS)]);
+        carPeople.set(key, [perNo, stInt, year, ...ints(row, CAR_PERSON_FIELDS)]);
       }
       const vin = vinMap.get(`${stCase}|${vehNo}`);
       if (vin && !ridesIn.has(key)) {
-        ridesIn.set(key, [perNo, stInt, vin]);
+        ridesIn.set(key, [perNo, stInt, year, vin]);
       }
       if (perType === "1") {
-        if (!drivers.has(key)) drivers.set(key, [perNo, stInt, ...ints(row, DRIVER_FIELDS)]);
+        if (!drivers.has(key)) drivers.set(key, [perNo, stInt, year, ...ints(row, DRIVER_FIELDS)]);
       } else {
-        if (!passengers.has(key)) passengers.set(key, [perNo, stInt]);
+        if (!passengers.has(key)) passengers.set(key, [perNo, stInt, year]);
       }
     } else if (perType === "5" || perType === "6") {
-      if (!peds.has(key)) peds.set(key, [perNo, stInt]);
+      if (!peds.has(key)) peds.set(key, [perNo, stInt, year]);
     }
   }
   return {
@@ -296,10 +304,14 @@ app.post(
       const vehicleRows  = parseCsvFile(vehiclePath);
       const personRows   = parseCsvFile(personPath);
 
+      const year = sniffYear(accidentRows);
+      if (year === null) {
+        return res.status(400).json({ message: "Could not read YEAR from accident.csv" });
+      }
       const { locations, crashes } = readAccidents(accidentRows);
-      const { vehicles, involves, vinMap } = readVehicles(vehicleRows);
+      const { vehicles, involves, vinMap } = readVehicles(vehicleRows, year);
       const { persons, peds, carPeople, passengers, drivers, ridesIn } =
-        readPersons(personRows, vinMap);
+        readPersons(personRows, vinMap, year);
 
       const rowsByTable = {
         Location: locations, Crash: crashes, Vehicle: vehicles, Person: persons,
