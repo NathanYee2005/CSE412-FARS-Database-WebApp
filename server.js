@@ -2,10 +2,15 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import { Pool } from "pg";
-import { parse } from "csv-parse/sync";
 import fs from "fs";
+import path from "path";
+import os from "os";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import dotenv from "dotenv";
 dotenv.config();
+
+const execFileP = promisify(execFile);
 
 const app = express();
 app.use(cors());
@@ -116,167 +121,28 @@ app.get("/api/crashes/heatmap", async (req, res) => {
   }
 });
 
-//FARS loader to mirror load_db.py in prod
-const PLACEHOLDER_VINS = new Set(["999999999999", "888888888888", "000000000000"]);
-const SENTINEL_LATS = [77.7777, 88.8888, 99.9999];
-
-const LOCATION_FIELDS = ["COUNTY", "CITY", "STATE", "TYP_INT", "REL_ROAD", "ROUTE"];
-const CRASH_FIELDS = ["PEDS", "PERSONS", "DAY", "MONTH", "YEAR", "NOT_HOUR", "ARR_HOUR",
-  "VE_TOTAL", "ARR_MIN", "MAN_COLL", "NOT_MIN", "FATALS"];
-const VEHICLE_FIELDS = ["MOD_YEAR", "MAKE", "BODY_TYP", "UNITTYPE"];
-const INVOLVES_FIELDS = ["NUMOCCS", "ROLLOVER", "TRAV_SP", "IMPACT1", "HIT_RUN",
-  "FIRE_EXP", "TOWED", "DEFORMED", "VSPD_LIM"];
-const PERSON_FIELDS = ["AGE", "SEX", "INJ_SEV", "HOSPITAL", "DOA"];
-const CAR_PERSON_FIELDS = ["EJECTION", "SEAT_POS", "REST_USE"];
-const DRIVER_FIELDS = ["DRINKING", "DRUGS"];
-
-const TABLE_COLUMNS = [
-  ["Location",   ["LATITUDE", "LONGITUDE", ...LOCATION_FIELDS]],
-  ["Crash",      ["ST_CASE", ...CRASH_FIELDS, "LATITUDE", "LONGITUDE", "WEATHER", "LGT_COND", "WRK_ZONE"]],
-  ["Vehicle",    ["VIN", "VEH_NO", ...VEHICLE_FIELDS]],
-  ["Person",     ["ST_CASE", "PER_NO", "YEAR", ...PERSON_FIELDS]],
-  ["Pedestrian", ["PER_NO", "ST_CASE", "YEAR"]],
-  ["CarPerson",  ["PER_NO", "ST_CASE", "YEAR", ...CAR_PERSON_FIELDS]],
-  ["Passenger",  ["PER_NO", "ST_CASE", "YEAR"]],
-  ["Driver",     ["PER_NO", "ST_CASE", "YEAR", ...DRIVER_FIELDS]],
-  ["Rides_In",   ["PER_NO", "ST_CASE", "YEAR", "VIN"]],
-  ["Involves",   ["ST_CASE", "YEAR", "VIN", ...INVOLVES_FIELDS]],
-];
-
-const toInt = (v) => {
-  if (v == null || v === "") return null;
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : null;
-};
-const toNum = (v) => {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-const ints = (row, fields) => fields.map((f) => toInt(row[f]));
-
-const isSentinel = (lat) => {
-  const v = Math.abs(Number(lat));
-  if (!Number.isFinite(v)) return true;
-  return SENTINEL_LATS.some((s) => Math.abs(v - s) < 0.001);
-};
-const resolveVin = (vin, year, stCase, vehNo) =>
-  PLACEHOLDER_VINS.has(vin) ? `UNK${year}${stCase}V${vehNo}` : vin;
-const synthPerNo = (vehNo, perNo) => parseInt(vehNo, 10) * 100 + parseInt(perNo, 10);
-
-function sniffYear(rows) {
-  for (const row of rows) {
-    const y = toInt(row.YEAR);
-    if (y !== null) return y;
-  }
-  return null;
-}
-
-function readAccidents(rows) {
-  const locations = new Map();
-  const crashes = [];
-  const seen = new Set();
-  for (const row of rows) {
-    const stCase = row.ST_CASE;
-    if (seen.has(stCase)) continue;
-    seen.add(stCase);
-    const lat = row.LATITUDE, lon = row.LONGITUD;
-    const sentinel = isSentinel(lat);
-    if (!sentinel) {
-      const key = `${lat},${lon}`;
-      if (!locations.has(key)) {
-        locations.set(key, [toNum(lat), toNum(lon), ...ints(row, LOCATION_FIELDS)]);
-      }
-    }
-    crashes.push([
-      toInt(stCase), ...ints(row, CRASH_FIELDS),
-      sentinel ? null : toNum(lat), sentinel ? null : toNum(lon),
-      ...ints(row, ["WEATHER", "LGT_COND", "WRK_ZONE"]),
-    ]);
-  }
-  return { locations: [...locations.values()], crashes };
-}
-
-function readVehicles(rows, year) {
-  const vehicles = new Map();
-  const involves = new Map();
-  const vinMap = new Map();
-  for (const row of rows) {
-    const stCase = row.ST_CASE, vehNo = row.VEH_NO;
-    const stInt = toInt(stCase);
-    const vin = resolveVin(row.VIN, year, stCase, vehNo);
-    vinMap.set(`${stCase}|${vehNo}`, vin);
-    if (!vehicles.has(vin)) {
-      vehicles.set(vin, [vin, toInt(vehNo), ...ints(row, VEHICLE_FIELDS)]);
-    }
-    const ik = `${stInt}|${vin}`;
-    if (!involves.has(ik)) {
-      involves.set(ik, [stInt, year, vin, ...ints(row, INVOLVES_FIELDS)]);
-    }
-  }
-  return { vehicles: [...vehicles.values()], involves: [...involves.values()], vinMap };
-}
-
-function readPersons(rows, vinMap, year) {
-  const persons = new Map(), peds = new Map(), carPeople = new Map();
-  const passengers = new Map(), drivers = new Map(), ridesIn = new Map();
-  for (const row of rows) {
-    const stCase = row.ST_CASE, vehNo = row.VEH_NO, perType = row.PER_TYP;
-    const stInt = toInt(stCase);
-    const perNo = synthPerNo(vehNo, row.PER_NO);
-    const key = `${perNo}|${stInt}`;
-    if (!persons.has(key)) {
-      persons.set(key, [stInt, perNo, year, ...ints(row, PERSON_FIELDS)]);
-    }
-    if (perType === "1" || perType === "2") {
-      if (!carPeople.has(key)) {
-        carPeople.set(key, [perNo, stInt, year, ...ints(row, CAR_PERSON_FIELDS)]);
-      }
-      const vin = vinMap.get(`${stCase}|${vehNo}`);
-      if (vin && !ridesIn.has(key)) {
-        ridesIn.set(key, [perNo, stInt, year, vin]);
-      }
-      if (perType === "1") {
-        if (!drivers.has(key)) drivers.set(key, [perNo, stInt, year, ...ints(row, DRIVER_FIELDS)]);
-      } else {
-        if (!passengers.has(key)) passengers.set(key, [perNo, stInt, year]);
-      }
-    } else if (perType === "5" || perType === "6") {
-      if (!peds.has(key)) peds.set(key, [perNo, stInt, year]);
-    }
-  }
+function getPgEnv() {
+  const url = new URL(process.env.DATABASE_URL);
   return {
-    persons: [...persons.values()],
-    peds: [...peds.values()],
-    carPeople: [...carPeople.values()],
-    passengers: [...passengers.values()],
-    drivers: [...drivers.values()],
-    ridesIn: [...ridesIn.values()],
+    PGUSER: decodeURIComponent(url.username),
+    PGPASSWORD: decodeURIComponent(url.password),
+    PGHOST: url.hostname,
+    PGPORT: url.port || "5432",
+    PGDATABASE: url.pathname.replace(/^\//, ""),
   };
 }
 
-async function bulkInsert(client, table, columns, rows, chunkSize = 500) {
-  if (!rows.length) return 0;
-  const cols = columns.join(", ");
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
-    const placeholders = chunk.map((_, r) =>
-      `(${columns.map((__, c) => `$${r * columns.length + c + 1}`).join(",")})`
-    ).join(",");
-    const flat = chunk.flat();
-    await client.query(
-      `INSERT INTO ${table} (${cols}) VALUES ${placeholders} ON CONFLICT DO NOTHING`,
-      flat
-    );
+// Pulls "  Location     39185" lines out of load_db.py's stdout into a {table: count} map.
+function parseInsertOutput(stdout) {
+  const inserted = {};
+  for (const line of stdout.split("\n")) {
+    const m = line.match(/^\s{2,}(\w+)\s+(\d+)/);
+    if (m) inserted[m[1]] = parseInt(m[2], 10);
   }
-  return rows.length;
+  return inserted;
 }
 
-function parseCsvFile(filePath) {
-  return parse(fs.readFileSync(filePath), { columns: true, skip_empty_lines: true });
-}
-
-// POST /api/upload multipart form expecting fields: accident, vehicle, person (FARS CSVs)
+// POST /api/upload — delegates to scripts/load_db.py (avoids duplicating loader logic)
 app.post(
   "/api/upload",
   upload.fields([
@@ -286,69 +152,40 @@ app.post(
   ]),
   async (req, res) => {
     const files = req.files ?? {};
-    const accidentPath = files.accident?.[0]?.path;
-    const vehiclePath  = files.vehicle?.[0]?.path;
-    const personPath   = files.person?.[0]?.path;
-    const tmpPaths = [accidentPath, vehiclePath, personPath].filter(Boolean);
+    const sources = {
+      accident: files.accident?.[0]?.path,
+      vehicle:  files.vehicle?.[0]?.path,
+      person:   files.person?.[0]?.path,
+    };
 
-    if (!accidentPath || !vehiclePath || !personPath) {
-      tmpPaths.forEach((p) => fs.existsSync(p) && fs.unlinkSync(p));
+    if (!sources.accident || !sources.vehicle || !sources.person) {
+      Object.values(sources).forEach((p) => p && fs.existsSync(p) && fs.unlinkSync(p));
       return res.status(400).json({
         message: "All three CSVs required: accident, vehicle, person",
       });
     }
 
-    const client = await pool.connect();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fars-upload-"));
     try {
-      const accidentRows = parseCsvFile(accidentPath);
-      const vehicleRows  = parseCsvFile(vehiclePath);
-      const personRows   = parseCsvFile(personPath);
-
-      const year = sniffYear(accidentRows);
-      if (year === null) {
-        return res.status(400).json({ message: "Could not read YEAR from accident.csv" });
+      for (const [name, src] of Object.entries(sources)) {
+        fs.renameSync(src, path.join(tmpDir, `${name}.csv`));
       }
-      const { locations, crashes } = readAccidents(accidentRows);
-      const { vehicles, involves, vinMap } = readVehicles(vehicleRows, year);
-      const { persons, peds, carPeople, passengers, drivers, ridesIn } =
-        readPersons(personRows, vinMap, year);
-
-      const rowsByTable = {
-        Location: locations, Crash: crashes, Vehicle: vehicles, Person: persons,
-        Pedestrian: peds, CarPerson: carPeople, Passenger: passengers, Driver: drivers,
-        Rides_In: ridesIn, Involves: involves,
-      };
-
-      await client.query("BEGIN");
-      const inserted = {};
-      for (const [table, columns] of TABLE_COLUMNS) {
-        inserted[table] = await bulkInsert(client, table, columns, rowsByTable[table]);
-      }
-      await client.query("COMMIT");
-      res.json({ inserted });
+      const { stdout } = await execFileP(
+        "python3",
+        ["scripts/load_db.py", "--csv-dir", tmpDir, "--no-schema"],
+        { env: { ...process.env, ...getPgEnv() }, maxBuffer: 50 * 1024 * 1024 }
+      );
+      res.json({ inserted: parseInsertOutput(stdout) });
     } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
       console.error("Upload error:", err);
-      res.status(500).json({ message: "Upload failed", error: err.message });
+      res.status(500).json({
+        message: "Upload failed",
+        error: (err.stderr || err.message || "").toString(),
+      });
     } finally {
-      client.release();
-      tmpPaths.forEach((p) => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }
 );
-
-// GET /admin — basic CSV upload page
-app.get("/admin", (_req, res) => {
-  res.send(`
-    <h1>FARS Admin Upload</h1>
-    <p>Select FARS <code>accident.csv</code>, <code>vehicle.csv</code>, and <code>person.csv</code>.</p>
-    <form method="POST" action="/api/upload" enctype="multipart/form-data">
-      <p><label>accident.csv: <input type="file" name="accident" accept=".csv" required></label></p>
-      <p><label>vehicle.csv: <input type="file" name="vehicle" accept=".csv" required></label></p>
-      <p><label>person.csv: <input type="file" name="person" accept=".csv" required></label></p>
-      <button type="submit">Upload</button>
-    </form>
-  `);
-});
 
 app.listen(3001, () => console.log("API running on http://localhost:3001"));
