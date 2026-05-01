@@ -1,7 +1,9 @@
 import { useState, useCallback } from "react";
 import CrashFilters from "./CrashFilters";
 import CrashTable from "./CrashTable";
+import styles from "./CrashExplorer.module.css";
 
+//Top-level page component that connects the filter form to the results table.
 export default function CrashExplorer({ apiBase = "/api" }) {
   const [crashes, setCrashes] = useState(null);
   const [total, setTotal] = useState(null);
@@ -33,13 +35,28 @@ export default function CrashExplorer({ apiBase = "/api" }) {
   );
 
   return (
-    <div>
-      <div>
-        <h1>Crash Explorer</h1>
-        <p>Fatality Analysis Reporting System — filter and explore fatal crash records</p>
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div className={styles.headerInner}>
+          <div className={styles.badge}>FARS</div>
+          <div>
+            <h1 className={styles.title}>Crash Explorer</h1>
+            <p className={styles.subtitle}>
+              Fatality Analysis Reporting System — filter and explore fatal crash records
+            </p>
+          </div>
+        </div>
       </div>
-      <CrashFilters onSearch={handleSearch} loading={loading} />
-      <CrashTable crashes={crashes} loading={loading} error={error} total={total} />
+
+      <div className={styles.content}>
+        <CrashFilters onSearch={handleSearch} loading={loading} />
+        <CrashTable
+          crashes={crashes}
+          loading={loading}
+          error={error}
+          total={total}
+        />
+      </div>
     </div>
   );
 }
