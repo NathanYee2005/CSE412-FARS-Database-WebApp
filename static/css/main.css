@@ -1,0 +1,86 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+header {
+  padding: .75rem 1.25rem;
+  background: #16213e;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #0f3460;
+}
+
+header h1 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  color: #e94560;
+}
+
+.filters {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 1;
+}
+
+.filters select,
+.filters input[type="number"] {
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #30475e;
+  border-radius: 4px;
+  padding: .3rem .5rem;
+  font-size: .825rem;
+  min-width: 9rem;
+}
+
+.filters select:focus,
+.filters input:focus {
+  outline: 2px solid #e94560;
+}
+
+#map-status {
+  font-size: .8rem;
+  color: #e94560;
+}
+
+#crash-count {
+  font-size: .8rem;
+  color: #aaa;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+#map {
+  flex: 1;
+}
+
+.popup-table {
+  border-collapse: collapse;
+  font-size: .78rem;
+  margin-top: .4rem;
+  width: 100%;
+}
+
+.popup-table th,
+.popup-table td {
+  border: 1px solid #ccc;
+  padding: .2rem .4rem;
+  text-align: left;
+}
+
+.popup-table th {
+  background: #eee;
+}

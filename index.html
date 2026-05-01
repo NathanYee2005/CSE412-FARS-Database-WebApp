@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FARS Crash Heatmap</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- leaflet.heat -->
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
+  <link rel="stylesheet" href="static/css/main.css" />
+</head>
+<body>
+
+<header>
+  <h1>FARS Crash Heatmap</h1>
+
+  <div class="filters">
+    <input id="filter-year" type="number" placeholder="Year (e.g. 2021)"
+           min="1975" max="2023" style="width:9rem;" />
+
+    <select id="filter-state"><option value="">All states</option></select>
+    <select id="filter-weather"><option value="">All weather</option></select>
+    <select id="filter-lgt"><option value="">All light conditions</option></select>
+    <select id="filter-wrk"><option value="">All work zones</option></select>
+
+    <span id="map-status"></span>
+  </div>
+
+  <span id="crash-count"></span>
+</header>
+
+<div id="map"></div>
+
+</body>
+</html>
